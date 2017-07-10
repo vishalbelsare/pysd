@@ -58,6 +58,7 @@ def build(elements, subscript_dict, namespace, outfile_name):
 
     from pysd.functions import cache
     from pysd import functions
+    from pysd import model
 
     _subscript_dict = %(subscript_dict)s
 
@@ -477,7 +478,7 @@ def add_macro(macro_name, filename, arg_names, arg_vals):
             [utils.make_python_identifier(f)[0] for f in arg_vals]),
         'real_name': 'Macro Instantiation of ' + macro_name,
         'doc': 'Instantiates the Macro',
-        'py_expr': "functions.Macro('%s', %s, '%s')" % (filename, func_args, macro_name),
+        'py_expr': "model.Macro('%s', %s, '%s', time)" % (filename, func_args, macro_name),
         'unit': 'None',
         'subs': '',
         'kind': 'stateful',

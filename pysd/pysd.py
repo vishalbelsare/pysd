@@ -12,7 +12,7 @@ Jan 2016: Rework to handle subscripts
 May 2016: Updates to handle grammar refactoring
 Sept 2016: Major refactor, putting most internal code into the Model and Macro objects
 """
-
+import pysd.model
 from . import functions
 
 
@@ -36,7 +36,7 @@ def read_vensim(mdl_file):
     """
     from .vensim2py import translate_vensim
     py_model_file = translate_vensim(mdl_file)
-    model = functions.Model(py_model_file)
+    model = pysd.model.Model(py_model_file)
     model.mdl_file = mdl_file
     return model
 
@@ -55,7 +55,7 @@ def load(py_model_file):
     --------
     >>> model = load('../tests/test-models/samples/teacup/teacup.py')
     """
-    return functions.Model(py_model_file)
+    return pysd.model.Model(py_model_file)
 
 
 

@@ -8,6 +8,10 @@ test_model = 'test-models/samples/teacup/teacup.mdl'
 
 class TestPySD(unittest.TestCase):
     def test_run(self):
+        """ Default behavior for the run function should be to
+        return a column for every model element that has a unique value,
+        at all timeperiods specified in the original model file."""
+
         import pysd
         model = pysd.read_vensim(test_model)
         stocks = model.run()
@@ -287,6 +291,43 @@ class TestPySD(unittest.TestCase):
                                return_timestamps=list(range(0, 5, 2)))
         self.assertIsInstance(res, list)
         self.assertIsInstance(res[0], dict)
+
+    def test_get_components_by_slice(self):
+        """
+        Addresses Issue #115
+
+        """
+        import pysd
+        model = pysd.read_vensim(test_model)
+        self.assertEqual(model.components['Teacup Temperature'], 180)
+
+    def test_raise_error_on_slice_lookup_function(self):
+        """
+        A lookup/table function has no particular value at any time
+        in the simulation, so an attempt to get that value should
+        raise an error saying so.
+
+        """
+        import pysd
+        model = pysd.read_vensim('test-models/tests/lookups/test_lookups.mdl')
+        with self.assertRaises(ValueError):
+            model.components['lookup function table']
+
+    def test_default_returns_with_lookups(self):
+        """
+        Addresses https://github.com/JamesPHoughton/pysd/issues/114
+
+        The default settings should skip model elements with no particular
+        return value
+        """
+        import pysd
+        model = pysd.read_vensim('test-models/tests/lookups/test_lookups.mdl')
+        ret = model.run()
+        self.assertTrue({'accumulation',
+                         'rate',
+                         'lookup function call'} <=
+                        set(ret.columns.values))
+
 
     def test_default_returns_with_construction_functions(self):
         """
