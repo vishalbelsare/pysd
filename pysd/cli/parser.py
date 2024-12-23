@@ -2,12 +2,17 @@
 cmdline parser
 """
 import os
+import re
 from ast import literal_eval
 import numpy as np
 import pandas as pd
 from argparse import ArgumentParser, Action
 
 from pysd import __version__
+from pysd.translators.vensim.vensim_utils import supported_extensions as\
+    vensim_extensions
+from pysd.translators.xmile.xmile_utils import supported_extensions as\
+    xmile_extensions
 
 docs = "https://pysd.readthedocs.io/en/master/command_line_usage.html"
 
@@ -25,10 +30,10 @@ def check_output(string):
     Checks that out put file ends with .tab or .csv
 
     """
-    if not string.endswith('.tab') and not string.endswith('.csv'):
+    if not string.endswith(('.tab', '.csv', '.nc')):
         parser.error(
             f'when parsing {string}'
-            '\nThe output file name must be .tab or .csv...')
+            '\nThe output file name must be .tab, .csv or .nc...')
 
     return string
 
@@ -38,18 +43,17 @@ def check_model(string):
     Checks that model file ends with .py .mdl or .xmile and that exists.
 
     """
-    if not string.lower().endswith('.mdl')\
-       and not string.lower().endswith('.xmile')\
-       and not string.endswith('.py'):
+    suffixes = [".py"] + vensim_extensions + xmile_extensions
+    if not any(string.lower().endswith(suffix) for suffix in suffixes):
         parser.error(
-            f'when parsing {string}'
-            '\nThe model file name must be Vensim (.mdl), Xmile (.xmile)'
-            ' or PySD (.py) model file...')
+            f"when parsing {string} \nThe model file name must be a Vensim"
+            f" ({', '.join(vensim_extensions)}), a Xmile "
+            f"({', '.join(xmile_extensions)}) or a PySD (.py) model file...")
 
     if not os.path.isfile(string):
         parser.error(
-            f'when parsing {string}'
-            '\nThe model file does not exist...')
+            f"when parsing {string}"
+            "\nThe model file does not exist...")
 
     return string
 
@@ -58,10 +62,10 @@ def check_data_file(string):
     """
     Check that data file is a tab or csv file and that exists.
     """
-    if not string.endswith('.tab') and not string.endswith('.csv'):
+    if not string.endswith(('.tab', '.csv', '.nc')):
         parser.error(
             f'when parsing {string}'
-            '\nThe data file name must be .tab or .csv...')
+            '\nThe data file name must be .tab, .csv or .nc...')
     elif not os.path.isfile(string):
         parser.error(
             f'when parsing {string}'
@@ -106,17 +110,8 @@ def split_timestamps(string):
         # error
         raise parser.error(
             f'when parsing {string}'
-            '\nThe return time stamps much be separated by commas...\n'
+            '\nThe return time stamps must be separated by commas...\n'
             f'See {docs} for examples.')
-
-
-def split_subview_sep(string):
-    """
-    Splits the subview separators
-    --subview-sep ' - ,.' -> [' - ', '.']
-
-    """
-    return string.split(",")
 
 
 def split_vars(string):
@@ -138,8 +133,8 @@ def split_vars(string):
             var, value = string.split(':')
             type = 'initial'
 
-        if value.strip().isnumeric():
-            # value is float
+        if re.match(r"^[+-]?(\d*\.)?\d+$", value.strip()):
+            # value is a number
             return {var.strip(): (type, float(value))}
 
         # value is series
@@ -190,7 +185,7 @@ parser.add_argument(
 parser.add_argument(
     '-o', '--output-file', dest='output_file',
     type=check_output, metavar='FILE',
-    help='output file to save run outputs (.tab or .csv)')
+    help='output file to save run outputs (.tab, .csv or .nc)')
 
 parser.add_argument(
     '-p', '--progress', dest='progress',
@@ -279,11 +274,12 @@ trans_arguments.add_argument(
 
 trans_arguments.add_argument(
     '--subview-sep', dest='subview_sep',
-    action='store', type=split_subview_sep, default=[],
-    metavar='\'STRING1,STRING2,..,STRINGN\'',
-    help='further division of views split in subviews, by identifying the'
+    action='store', nargs="*", default=[],
+    metavar='separator_1 separator_2 ... separator_n',
+    help='further division of views into subviews, by identifying the '
          'separator string in the view name, only availabe if --split-views'
-         ' is used')
+         ' is used. Passing positional arguments after this argument will'
+         ' not work')
 
 
 #######################
@@ -313,17 +309,17 @@ parser.add_argument('model_file', metavar='model_file', type=check_model,
 parser.add_argument('new_values',
                     metavar='variable=new_value', type=split_vars,
                     nargs='*', action=SplitVarsAction,
-                    help='redefine the value of variable with new value.'
-                    'variable must be a model component, new_value can be a '
-                    'float or a a list of two list')
+                    help='redefine the value of variable with new value. '
+                    'variable must be a model component, new_value may be a '
+                    'float or a list of two lists')
 
-# The destionation new_values2 will never used as the previous argument
+# The destination new_values2 will never be used as the previous argument
 # is given also with nargs='*'. Nevertheless, the following variable
 # is declared for documentation
 parser.add_argument('new_values2',
                     metavar='variable:initial_value', type=split_vars,
                     nargs='*', action=SplitVarsAction,
-                    help='redefine the initial value of variable.'
+                    help='redefine the initial value of variable. '
                     'variable must be a model stateful element, initial_value'
                     ' must be a float')
 

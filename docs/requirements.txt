@@ -1,0 +1,8 @@
+# File: docs/requirements.txt
+
+sphinx>=8.0.0
+sphinx_rtd_theme>=3.0.0
+readthedocs-sphinx-search>=0.3.2
+jinja2>=3.0.0
+mock
+pandas

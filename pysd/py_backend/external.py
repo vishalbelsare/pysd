@@ -5,14 +5,21 @@ the Stateful objects by functions.Model.initialize.
 """
 
 import re
-import os
 import warnings
-import pandas as pd  # TODO move to openpyxl
+
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+
 import numpy as np
 import xarray as xr
-from openpyxl import load_workbook
+import pandas as pd
+
 from . import utils
 from .data import Data
+from .lookups import Lookups
+
+
+_SPREADSHEET_EXTS = {'.xls', '.xlsx', '.xlsm', '.xlsb', '.odf', '.ods', '.odt'}
 
 
 class Excels():
@@ -22,19 +29,35 @@ class Excels():
     _Excels, _Excels_opyxl = {}, {}
 
     @classmethod
-    def read(cls, file_name, sheet_name):
+    def read(cls, file_name, tab):
         """
         Read the Excel file or return the previously read one
         """
-        if file_name + sheet_name in cls._Excels:
-            return cls._Excels[file_name + sheet_name]
+        if file_name.joinpath(tab) in cls._Excels:
+            return cls._Excels[file_name.joinpath(tab)]
         else:
+            # get the function to read the data based on its extension
+            read_kwargs = {}
+            ext = file_name.suffix.lower()
+            if ext in _SPREADSHEET_EXTS:
+                read_func = pd.read_excel
+                read_kwargs['sheet_name'] = tab
+            elif ext == '.csv':
+                read_func = pd.read_csv
+                if tab and not tab[0].isalnum():
+                    read_kwargs['sep'] = tab
+            else:
+                read_func = pd.read_table
+                if tab and not tab[0].isalnum():
+                    read_kwargs['sep'] = tab
+            # read the data
             excel = np.array([
                 pd.to_numeric(ex, errors='coerce')
                 for ex in
-                pd.read_excel(file_name, sheet_name, header=None).values
+                read_func(file_name, header=None, **read_kwargs).values
                 ])
-            cls._Excels[file_name + sheet_name] = excel
+            # save data for future retrievals
+            cls._Excels[file_name.joinpath(tab)] = excel
             return excel
 
     @classmethod
@@ -68,7 +91,7 @@ class External(object):
     Attributes
     ----------
     py_name: str
-        The python name of the object
+        The Python name of the object
     missing: str ("warning", "error", "ignore", "keep")
         What to do with missing values. If "warning" (default)
         shows a warning message and interpolates the values.
@@ -78,8 +101,9 @@ class External(object):
         fail, but it may be used to check the quality of the data.
     file: str
         File name from which the data is read.
-    sheet: str
-        Sheet name from which the data is read.
+    tab: str
+        Tab name from which the data is read. If file type is not a
+        spreadsheet this will be used as a separator.
 
     """
     missing = "warning"
@@ -87,7 +111,7 @@ class External(object):
     def __init__(self, py_name):
         self.py_name = py_name
         self.file = None
-        self.sheet = None
+        self.tab = None
 
     def __str__(self):
         return self.py_name
@@ -109,25 +133,27 @@ class External(object):
             depending on the shape of the requested data
 
         """
-        # TODO move to openpyxl to avoid pandas dependency in this file.
-        ext = os.path.splitext(self.file)[1].lower()
-        if ext in ['.xls', '.xlsx']:
-            # read data
-            data = Excels.read(
-                self.file,
-                self.sheet)[rows[0]:rows[1], cols[0]:cols[1]].copy()
+        # read data
+        data = Excels.read(
+            self.file,
+            self.tab)[rows[0]:rows[1], cols[0]:cols[1]].copy()
 
-            shape = data.shape
-            # if it is a single row remove its dimension
-            if shape[1] == 1:
-                data = data[:, 0]
-            if shape[0] == 1:
-                data = data[0]
-            return data
+        shape = data.shape
 
-        raise NotImplementedError(self.py_name + "\n"
-                                  + "The files with extension "
-                                  + ext + " are not implemented")
+        # empty cells
+        if shape[0] == 0 or shape[1] == 0:
+            raise ValueError(
+                self.py_name + "\n"
+                "The cells are empty.\n"
+                + self._file_sheet
+            )
+
+        # if it is a single row remove its dimension
+        if shape[1] == 1:
+            data = data[:, 0]
+        if shape[0] == 1:
+            data = data[0]
+        return data
 
     def _get_data_from_file_opyxl(self, cellname):
         """
@@ -142,47 +168,70 @@ class External(object):
         -------
         data: numpy.ndarray or float
             depending on the shape of the requested data
+        shape: list
+            The shape of the data in 2D.
 
         """
         # read data
-        excel = Excels.read_opyxl(self.file)
         try:
-            # Get the local id of the sheet
-            # needed for searching in locals names
-            # need to lower the sheetnames as Vensim has no case sensitivity
-            sheetId = [sheetname_wb.lower() for sheetname_wb
-                       in excel.sheetnames].index(self.sheet.lower())
-        except ValueError:
-            # Error if it is not able to get the localSheetId
-            raise ValueError(self.py_name + "\n"
-                             + "The sheet doesn't exist...\n"
-                             + self._file_sheet)
+            excel = Excels.read_opyxl(self.file)
+        except InvalidFileException:
+            raise ValueError(
+                self.py_name + "\n"
+                f"Cannot read the file '{self.file}'...\n"
+                f"It could happen that cell='{cellname}' was "
+                "read as a cell range name due to a wrong "
+                "definition of cell value"
+            )
 
+        # Get global and local cellrange names
+        global_cellranges = excel.defined_names
+        local_cellranges = None
+        # need to lower the sheetnames as Vensim has no case sensitivity
+        for sheet in excel.sheetnames:
+            if sheet.lower() == self.tab.lower():
+                local_cellranges = excel[sheet].defined_names
+                break
+
+        if local_cellranges is None:
+            # Error if it is not able to get the localSheetId
+            raise ValueError(
+                self.py_name + "\n"
+                "The sheet doesn't exist...\n"
+                + self._file_sheet
+            )
         try:
             # Search for local and global names
-            cellrange = excel.defined_names.get(cellname, sheetId)\
-                        or excel.defined_names.get(cellname)
-            coordinates = cellrange.destinations
-            for sheet, cells in coordinates:
-                if sheet.lower() == self.sheet.lower():
-                    values = excel[sheet][cells]
-                    try:
-                        return np.array(
-                            [[i.value if not isinstance(i.value, str)
-                              else np.nan for i in j] for j in values],
-                            dtype=float)
-                    except TypeError:
-                        return float(values.value)
+            cellrange = local_cellranges.get(cellname)\
+                        or global_cellranges.get(cellname)
+            sheet, cells = next(cellrange.destinations)
 
-            raise AttributeError
+            assert sheet.lower() == self.tab.lower()
+            self.tab = sheet  # case insensitivity in sheet name
 
-        except (KeyError, AttributeError):
+            # Get the cells where the cellrange is defined
+            cells = re.split(r":|\$", cells)
+            cols = [self._col_to_num(cells[1]), None]
+            rows = [int(cells[2])-1, None]
+            if len(cells) == 3:
+                # 0 dim cell range
+                cols[1] = cols[0]+1
+                rows[1] = rows[0]+1
+            else:
+                # array or table
+                cols[1] = self._col_to_num(cells[4])+1
+                rows[1] = int(cells[5])
+            # Use pandas to read the data and return its original shape
+            return self._get_data_from_file(rows, cols), \
+                [rows[1]-rows[0], cols[1]-cols[0]]
+
+        except (AttributeError, AssertionError):
             # key error if the cellrange doesn't exist in the file or sheet
             raise AttributeError(
-              self.py_name + "\n"
-              + "The cell range name:\t {}\n".format(cellname)
-              + "Doesn't exist in:\n" + self._file_sheet
-              )
+               self.py_name + "\n"
+               f"The cellrange name '{cellname}'\n"
+               "Doesn't exist in:\n" + self._file_sheet
+               )
 
     def _get_series_data(self, series_across, series_row_or_col, cell, size):
         """
@@ -243,67 +292,57 @@ class External(object):
 
         else:
             # get series data
-            series = self._get_data_from_file_opyxl(series_row_or_col)
+            series, s_shape = self._get_data_from_file_opyxl(series_row_or_col)
+
             if isinstance(series, float):
-                series = np.array([[series]])
+                series = np.array([series])
 
-            series_shape = series.shape
-
-            if series_shape[0] == 1:
-                # horizontal definition of lookup/time dimension
-                series = series[0]
-                transpose = True
-
-            elif series_shape[1] == 1:
-                # vertical definition of lookup/time dimension
-                series = series[:, 0]
-                transpose = False
-
-            else:
+            if s_shape[0] > 1 and s_shape[1] > 1:
                 # Error if the lookup/time dimension is 2D
                 raise ValueError(
                   self.py_name + "\n"
                   + "Dimension given in:\n"
                   + self._file_sheet
-                  + "\tDimentime_missingsion name:"
-                  + "\t{}\n".format(series_row_or_col)
+                  + "\tDimension name:"
+                  + "\t'{}'\n".format(series_row_or_col)
                   + " is a table and not a vector"
                   )
+            elif s_shape[1] != 1:
+                transpose = True
+            else:
+                transpose = False
 
             # get data
-            data = self._get_data_from_file_opyxl(cell)
+            data, d_shape = self._get_data_from_file_opyxl(cell)
 
             if isinstance(data, float):
-                data = np.array([[data]])
+                data = np.array([data])
 
             if transpose:
                 # transpose for horizontal definition of dimension
                 data = data.transpose()
+                d_shape = d_shape[1], d_shape[0]
 
-            if data.shape[0] != len(series):
+            if d_shape[0] != len(series):
                 raise ValueError(
                   self.py_name + "\n"
                   + "Dimension and data given in:\n"
                   + self._file_sheet
-                  + "\tDimension name:\t{}\n".format(series_row_or_col)
-                  + "\tData name:\t{}\n".format(cell)
+                  + "\tDimension name:\t'{}'\n".format(series_row_or_col)
+                  + "\tData name:\t'{}'\n".format(cell)
                   + " don't have the same length in the 1st dimension"
                   )
 
-            if data.shape[1] != size:
+            if d_shape[1] != size:
                 # Given coordinates length is different than
                 # the lentgh of 2nd dimension
                 raise ValueError(
                   self.py_name + "\n"
                   + "Data given in:\n"
                   + self._file_sheet
-                  + "\tData name:\t{}\n".format(cell)
+                  + "\tData name:\t'{}'\n".format(cell)
                   + " has not the same size as the given coordinates"
                   )
-
-            if data.shape[1] == 1:
-                # remove second dimension of data if its shape is (N, 1)
-                data = data[:, 0]
 
         return series, data
 
@@ -314,7 +353,7 @@ class External(object):
 
         Parameters
         ----------
-        root: str
+        root: pathlib.Path or str
             The root path to the model file.
 
         Returns
@@ -322,18 +361,19 @@ class External(object):
         None
 
         """
-        if self.file[0] == '?':
+        if str(self.file)[0] == '?':
             # TODO add an option to include indirect references
             raise ValueError(
                 self.py_name + "\n"
-                + f"Indirect reference to file: {self.file}")
+                + f"Indirect reference to file: '{self.file}'")
 
-        self.file = os.path.join(root, self.file)
+        # Join path and resolve it to better print error messages
+        self.file = root.joinpath(self.file).resolve()
 
-        if not os.path.isfile(self.file):
+        if not self.file.is_file():
             raise FileNotFoundError(
                 self.py_name + "\n"
-                + f"File '{self.file}' not found.")
+                + "File '%s' not found." % self.file)
 
     def _initialize_data(self, element_type):
         """
@@ -375,7 +415,7 @@ class External(object):
                     self.py_name + "\n"
                     + "Dimension given in:\n"
                     + self._file_sheet
-                    + "\t{}:\t{}\n".format(series_across, self.x_row_or_col)
+                    + "\t{}:\t'{}'\n".format(series_across, self.x_row_or_col)
                     + " has length 0"
                     )
 
@@ -393,7 +433,7 @@ class External(object):
                     self.py_name + "\n"
                     + "Dimension given in:\n"
                     + self._file_sheet
-                    + "\t{}:\t{}\n".format(series_across, self.x_row_or_col)
+                    + "\t{}:\t'{}'\n".format(series_across, self.x_row_or_col)
                     + " has length 0"
                     )
             if self.missing == "warning":
@@ -401,7 +441,7 @@ class External(object):
                   self.py_name + "\n"
                   + "Dimension value missing or non-valid in:\n"
                   + self._file_sheet
-                  + "\t{}:\t{}\n".format(series_across, self.x_row_or_col)
+                  + "\t{}:\t'{}'\n".format(series_across, self.x_row_or_col)
                   + " the corresponding data value(s) to the "
                   + "missing/non-valid value(s) will be ignored\n\n"
                   )
@@ -410,7 +450,7 @@ class External(object):
                   self.py_name + "\n"
                   + "Dimension value missing or non-valid in:\n"
                   + self._file_sheet
-                  + "\t{}:\t{}\n".format(series_across, self.x_row_or_col)
+                  + "\t{}:\t'{}'\n".format(series_across, self.x_row_or_col)
                   )
 
         # reorder data with increasing series
@@ -423,7 +463,7 @@ class External(object):
                 raise ValueError(self.py_name + "\n"
                                  + "Dimension given in:\n"
                                  + self._file_sheet
-                                 + "\t{}:\t{}\n".format(
+                                 + "\t{}:\t'{}'\n".format(
                                     series_across, self.x_row_or_col)
                                  + " has repeated values")
 
@@ -448,7 +488,7 @@ class External(object):
                     self.py_name + "\n"
                     + "Data value missing or non-valid in:\n"
                     + self._file_sheet
-                    + "\t{}:\t{}\n".format(cell_type, self.cell)
+                    + "\t{}:\t'{}'\n".format(cell_type, self.cell)
                     + interpolate_message + "\n\n"
                     )
             elif self.missing == "raise":
@@ -456,16 +496,15 @@ class External(object):
                     self.py_name + "\n"
                     + "Data value missing or non-valid in:\n"
                     + self._file_sheet
-                    + "\t{}:\t{}\n".format(cell_type, self.cell)
+                    + "\t{}:\t'{}'\n".format(cell_type, self.cell)
                     )
             # fill values
             if self.interp != "raw":
                 self._fill_missing(series, data)
 
+        # reshape the data to fit in the xarray.DataArray
         reshape_dims = tuple([len(series)] + utils.compute_shape(self.coords))
-
-        if len(reshape_dims) > 1:
-            data = self._reshape(data, reshape_dims)
+        data = self._reshape(data, reshape_dims)
 
         if element_type == "lookup":
             dim_name = "lookup_dim"
@@ -546,9 +585,9 @@ class External(object):
                 y[i] = yr[-1]
             elif value <= xr[0]:
                 y[i] = yr[0]
-            elif self.interp == 'look forward':
+            elif self.interp == 'look_forward':
                 y[i] = yr[xr >= value][0]
-            elif self.interp == 'hold backward':
+            elif self.interp == 'hold_backward':
                 y[i] = yr[xr <= value][-1]
             else:
                 y[i] = np.interp(value, xr, yr)
@@ -559,8 +598,8 @@ class External(object):
         """
         Returns file and sheet name in a string
         """
-        return "\tFile name:\t{}\n".format(self.file)\
-               + "\tSheet name:\t{}\n".format(self.sheet)
+        return "\tFile name:\t'{}'\n".format(self.file)\
+               + "\tSheet name:\t'{}'\n".format(self.tab)
 
     @staticmethod
     def _col_to_num(col):
@@ -641,10 +680,10 @@ class External(object):
         numpy.ndarray
           reshaped array
         """
-        try:
+        if isinstance(data, (float, int)):
+            data = np.array(data)
+        elif isinstance(data, xr.DataArray):
             data = data.values
-        except AttributeError:
-            pass
 
         return data.reshape(dims)
 
@@ -691,43 +730,40 @@ class ExtData(External, Data):
     Class for Vensim GET XLS DATA/GET DIRECT DATA
     """
 
-    def __init__(self, file_name, sheet, time_row_or_col, cell,
-                 interp, coords, root, py_name):
+    def __init__(self, file_name, tab, time_row_or_col, cell,
+                 interp, coords, root, final_coords, py_name):
         super().__init__(py_name)
         self.files = [file_name]
-        self.sheets = [sheet]
+        self.tabs = [tab]
         self.time_row_or_cols = [time_row_or_col]
         self.cells = [cell]
         self.coordss = [coords]
         self.root = root
-        self.interp = interp
+        self.final_coords = final_coords
+        self.interp = interp or "interpolate"
         self.is_float = not bool(coords)
 
         # check if the interpolation method is valid
-        if not interp:
-            self.interp = "interpolate"
-
         if self.interp not in ["interpolate", "raw",
-                               "look forward", "hold backward"]:
+                               "look_forward", "hold_backward"]:
             raise ValueError(self.py_name + "\n"
                              + " The interpolation method (interp) must be "
                              + "'raw', 'interpolate', "
-                             + "'look forward' or 'hold backward")
+                             + "'look_forward' or 'hold_backward'")
 
-    def add(self, file_name, sheet, time_row_or_col, cell,
-            interp, coords):
+    def add(self, file_name, tab, time_row_or_col, cell, interp, coords):
         """
         Add information to retrieve new dimension in an already declared object
         """
         self.files.append(file_name)
-        self.sheets.append(sheet)
+        self.tabs.append(tab)
         self.time_row_or_cols.append(time_row_or_col)
         self.cells.append(cell)
         self.coordss.append(coords)
 
-        if not interp:
-            interp = "interpolate"
-        if interp != self.interp:
+        interp = interp or "interpolate"
+
+        if interp.replace(" ", "_") != self.interp:
             raise ValueError(self.py_name + "\n"
                              + "Error matching interpolation method with "
                              + "previously defined one")
@@ -740,36 +776,63 @@ class ExtData(External, Data):
         """
         Initialize all elements and create the self.data xarray.DataArray
         """
-        self.data = utils.xrmerge(*[
-            self._initialize_data("data")
-            for self.file, self.sheet, self.x_row_or_col,
-            self.cell, self.coords
-            in zip(self.files, self.sheets, self.time_row_or_cols,
-                   self.cells, self.coordss)])
+        if not self.coordss[0]:
+            # Just load one value (no add)
+            for self.file, self.tab, self.x_row_or_col, \
+                self.cell, self.coords\
+                in zip(self.files, self.tabs, self.time_row_or_cols,
+                       self.cells, self.coordss):
+                self.data = self._initialize_data("data")
+        else:
+            # Load in several lines (add)
+            self.data = xr.DataArray(
+                np.nan, self.final_coords, list(self.final_coords))
+
+            for self.file, self.tab, self.x_row_or_col, \
+                self.cell, self.coords\
+                in zip(self.files, self.tabs, self.time_row_or_cols,
+                       self.cells, self.coordss):
+                values = self._initialize_data("data")
+
+                coords = {"time": values.coords["time"].values, **self.coords}
+                if "time" not in self.data.dims:
+                    self.data = self.data.expand_dims(
+                        {"time": coords["time"]}, axis=0).copy()
+
+                self.data.loc[coords] = values.values
+
+        # set what to return when raw
+        if self.final_coords:
+            self.nan = xr.DataArray(
+                np.nan, self.final_coords, list(self.final_coords))
+        else:
+            self.nan = np.nan
 
 
-class ExtLookup(External):
+class ExtLookup(External, Lookups):
     """
     Class for Vensim GET XLS LOOKUPS/GET DIRECT LOOKUPS
     """
 
-    def __init__(self, file_name, sheet, x_row_or_col, cell,
-                 coords, root, py_name):
+    def __init__(self, file_name, tab, x_row_or_col, cell, coords,
+                 root, final_coords, py_name):
         super().__init__(py_name)
         self.files = [file_name]
-        self.sheets = [sheet]
+        self.tabs = [tab]
         self.x_row_or_cols = [x_row_or_col]
         self.cells = [cell]
-        self.root = root
         self.coordss = [coords]
+        self.root = root
+        self.final_coords = final_coords
         self.interp = "interpolate"
+        self.is_float = not bool(coords)
 
-    def add(self, file_name, sheet, x_row_or_col, cell, coords):
+    def add(self, file_name, tab, x_row_or_col, cell, coords):
         """
         Add information to retrieve new dimension in an already declared object
         """
         self.files.append(file_name)
-        self.sheets.append(sheet)
+        self.tabs.append(tab)
         self.x_row_or_cols.append(x_row_or_col)
         self.cells.append(cell)
         self.coordss.append(coords)
@@ -782,64 +845,33 @@ class ExtLookup(External):
         """
         Initialize all elements and create the self.data xarray.DataArray
         """
-        self.data = utils.xrmerge(*[
-            self._initialize_data("lookup")
-            for self.file, self.sheet, self.x_row_or_col,
-            self.cell, self.coords
-            in zip(self.files, self.sheets, self.x_row_or_cols,
-                   self.cells, self.coordss)])
-
-    def __call__(self, x):
-        return self._call(self.data, x)
-
-    def _call(self, data, x):
-        if isinstance(x, xr.DataArray):
-            if not x.dims:
-                # shape 0 xarrays
-                return self._call(data, float(x))
-            if np.all(x > data['lookup_dim'].values[-1]):
-                outdata, _ = xr.broadcast(data[-1], x)
-                warnings.warn(
-                  self.py_name + "\n"
-                  + "extrapolating data above the maximum value of the series")
-            elif np.all(x < data['lookup_dim'].values[0]):
-                outdata, _ = xr.broadcast(data[0], x)
-                warnings.warn(
-                  self.py_name + "\n"
-                  + "extrapolating data below the minimum value of the series")
-            else:
-                data, _ = xr.broadcast(data, x)
-                outdata = data[0].copy()
-                for a in utils.xrsplit(x):
-                    outdata.loc[a.coords] = self._call(
-                        data.loc[a.coords],
-                        float(a))
-            # the output will be always an xarray
-            return outdata.reset_coords('lookup_dim', drop=True)
-
+        if not self.coordss[0]:
+            # Just loag one value (no add)
+            for self.file, self.tab, self.x_row_or_col, \
+                self.cell, self.coords\
+                in zip(self.files, self.tabs, self.x_row_or_cols,
+                       self.cells, self.coordss):
+                self.data = self._initialize_data("lookup")
         else:
-            if x in data['lookup_dim'].values:
-                outdata = data.sel(lookup_dim=x)
-            elif x > data['lookup_dim'].values[-1]:
-                outdata = data[-1]
-                warnings.warn(
-                  self.py_name + "\n"
-                  + "extrapolating data above the maximum value of the series")
-            elif x < data['lookup_dim'].values[0]:
-                outdata = data[0]
-                warnings.warn(
-                  self.py_name + "\n"
-                  + "extrapolating data below the minimum value of the series")
-            else:
-                outdata = data.interp(lookup_dim=x)
+            # Load in several lines (add)
+            self.data = xr.DataArray(
+                np.nan, self.final_coords, list(self.final_coords))
 
-            # the output could be a float or an xarray
-            if self.coordss[0]:
-                # Remove lookup dimension coord from the DataArray
-                return outdata.reset_coords('lookup_dim', drop=True)
-            else:
-                # if lookup has no-coords return a float
-                return float(outdata)
+            for self.file, self.tab, self.x_row_or_col, \
+                self.cell, self.coords\
+                in zip(self.files, self.tabs, self.x_row_or_cols,
+                       self.cells, self.coordss):
+                values = self._initialize_data("lookup")
+
+                coords = {
+                    "lookup_dim": values.coords["lookup_dim"].values,
+                    **self.coords
+                }
+                if "lookup_dim" not in self.data.dims:
+                    self.data = self.data.expand_dims(
+                        {"lookup_dim": coords["lookup_dim"]}, axis=0).copy()
+
+                self.data.loc[coords] = values.values
 
 
 class ExtConstant(External):
@@ -847,22 +879,26 @@ class ExtConstant(External):
     Class for Vensim GET XLS CONSTANTS/GET DIRECT CONSTANTS
     """
 
-    def __init__(self, file_name, sheet, cell, coords, root, py_name):
+    def __init__(self, file_name, tab, cell, coords,
+                 root, final_coords, py_name):
         super().__init__(py_name)
         self.files = [file_name]
-        self.sheets = [sheet]
-        self.transposes = [cell[-1] == '*']
+        self.tabs = [tab]
+        self.transposes = [
+            cell[-1] == '*' and np.prod(utils.compute_shape(coords)) > 1]
         self.cells = [cell.strip('*')]
-        self.root = root
         self.coordss = [coords]
+        self.root = root
+        self.final_coords = final_coords
 
-    def add(self, file_name, sheet, cell, coords):
+    def add(self, file_name, tab, cell, coords):
         """
         Add information to retrieve new dimension in an already declared object
         """
         self.files.append(file_name)
-        self.sheets.append(sheet)
-        self.transposes.append(cell[-1] == '*')
+        self.tabs.append(tab)
+        self.transposes.append(
+            cell[-1] == '*' and np.prod(utils.compute_shape(coords)) > 1)
         self.cells.append(cell.strip('*'))
         self.coordss.append(coords)
 
@@ -874,11 +910,22 @@ class ExtConstant(External):
         """
         Initialize all elements and create the self.data xarray.DataArray
         """
-        self.data = utils.xrmerge(*[
-            self._initialize()
-            for self.file, self.sheet, self.transpose, self.cell, self.coords
-            in zip(self.files, self.sheets, self.transposes,
-                   self.cells, self.coordss)])
+        if not self.coordss[0]:
+            # Just loag one value (no add)
+            for self.file, self.tab, self.transpose, self.cell, self.coords\
+                in zip(self.files, self.tabs, self.transposes,
+                       self.cells, self.coordss):
+                self.data = self._initialize()
+        else:
+            # Load in several lines (add)
+
+            self.data = xr.DataArray(
+                np.nan, self.final_coords, list(self.final_coords))
+
+            for self.file, self.tab, self.transpose, self.cell, self.coords\
+                in zip(self.files, self.tabs, self.transposes,
+                       self.cells, self.coordss):
+                self.data.loc[self.coords] = self._initialize().values
 
     def _initialize(self):
         """
@@ -916,28 +963,26 @@ class ExtConstant(External):
                     self.py_name + "\n"
                     + "Constant value missing or non-valid in:\n"
                     + self._file_sheet
-                    + "\t{}:\t{}\n".format(cell_type, self.cell)
+                    + "\t{}:\t'{}'\n".format(cell_type, self.cell)
                     )
             elif self.missing == "raise":
                 raise ValueError(
                     self.py_name + "\n"
                     + "Constant value missing or non-valid in:\n"
                     + self._file_sheet
-                    + "\t{}:\t{}\n".format(cell_type, self.cell)
+                    + "\t{}:\t'{}'\n".format(cell_type, self.cell)
                     )
 
         # Create only an xarray if the data is not 0 dimensional
         if len(self.coords) > 0:
             reshape_dims = tuple(utils.compute_shape(self.coords))
-
-            if len(reshape_dims) > 1:
-                data = self._reshape(data, reshape_dims)
-
-            data = xr.DataArray(
+            data = self._reshape(data, reshape_dims)
+            return xr.DataArray(
                 data=data, coords=self.coords, dims=list(self.coords)
             )
-
-        return data
+        else:
+            # need to ensure float is returned and not numpy.float
+            return float(data)
 
     def _get_constant_data(self, data_across, cell, shape):
         """
@@ -951,7 +996,7 @@ class ExtConstant(External):
             If data_across is "cell" the lefttop split cell value where
             the data is.
             If data_across is "name" the cell range name where the data is.
-        shape:
+        shape: list
             The shape of the data in 2D.
 
         Returns
@@ -970,30 +1015,8 @@ class ExtConstant(External):
 
         else:
             # read data from cell range name using OpenPyXL
-            data = self._get_data_from_file_opyxl(cell)
-
-            try:
-                # Remove length=1 axis
-                data_shape = data.shape
-                if data_shape[1] == 1:
-                    data = data[:, 0]
-                if data_shape[0] == 1:
-                    data = data[0]
-            except AttributeError:
-                # Data is a float, nothing to do
-                pass
-
-            # Check data dims
-            try:
-                if shape[0] == 1 and shape[1] != 1:
-                    assert shape[1] == len(data)
-                elif shape[0] != 1 and shape[1] == 1:
-                    assert shape[0] == len(data)
-                elif shape[0] == 1 and shape[1] == 1:
-                    assert isinstance(data, float)
-                else:
-                    assert tuple(shape) == data.shape
-            except AssertionError:
+            data, xl_shape = self._get_data_from_file_opyxl(cell)
+            if shape != xl_shape:
                 raise ValueError(self.py_name + "\n"
                                  + "Data given in:\n"
                                  + self._file_sheet
@@ -1012,19 +1035,129 @@ class ExtSubscript(External):
     Class for Vensim GET XLS SUBSCRIPT/GET DIRECT SUBSCRIPT
     """
 
-    def __init__(self, file_name, sheet, firstcell, lastcell, prefix, root):
+    def __init__(self, file_name, tab, firstcell, lastcell, prefix, root):
         super().__init__("Hardcoded external subscript")
         self.file = file_name
-        self.sheet = sheet
+        self.tab = tab
+        self.prefix = prefix
         self._resolve_file(root=root)
+        split = self._split_excel_cell(firstcell)
+        if split:
+            subs = self.get_subscripts_cell(*split, lastcell)
+        else:
+            subs = self.get_subscripts_name(firstcell)
 
-        row_first, col_first = self._split_excel_cell(firstcell)
-        row_last, col_last = self._split_excel_cell(lastcell)
-        data = pd.read_excel(
-            self.file, sheet,
-            skiprows=row_first-1,
-            nrows=row_last-row_first+1,
-            usecols=np.arange(col_first, col_last+1)
+        self.subscript = [
+            self.prefix + str(d) for d in subs.flatten()
+            if self._not_nan(d)
+            ]
+
+    def get_subscripts_cell(self, row_first, col_first, lastcell):
+        """Get subscripts from common cell definition"""
+        if not lastcell:
+            row_last, col_last = None, None
+        else:
+            split = self._split_excel_cell(lastcell)
+            if split:
+                # last cell is col and row
+                row_last, col_last = split
+            elif lastcell.isdigit():
+                # last cell is row number only
+                row_last = int(lastcell)-1
+                col_last = None
+            else:
+                # last cell is a col value only
+                row_last = None
+                col_last = self._col_to_num(lastcell)
+
+        # update read keywargs for rows and columns to read
+        read_kwargs = {}
+        if row_last is not None:
+            read_kwargs['nrows'] = row_last-row_first+1
+        if col_last is not None:
+            read_kwargs['usecols'] = np.arange(col_first, col_last+1)
+
+        # get the function to read the data based on its extension
+        ext = self.file.suffix.lower()
+        if ext in _SPREADSHEET_EXTS:
+            read_func = pd.read_excel
+            read_kwargs['sheet_name'] = self.tab
+        elif ext == '.csv':
+            read_func = pd.read_csv
+            if self.tab and not self.tab[0].isalnum():
+                read_kwargs['sep'] = self.tab
+        else:
+            read_func = pd.read_table
+            if self.tab and not self.tab[0].isalnum():
+                read_kwargs['sep'] = self.tab
+
+        # read the data
+        data = read_func(
+            self.file,
+            skiprows=row_first,
+            dtype=object,
+            header=None,
+            **read_kwargs
+            ).values
+
+        # skip columns if usecols couldn't be used
+        if col_last is None:
+            data = data[:, col_first:]
+
+        return data
+
+    def get_subscripts_name(self, cellname):
+        """Get subscripts from cell range name definition"""
+        try:
+            excel = load_workbook(self.file, read_only=True, data_only=True)
+        except InvalidFileException:
+            raise ValueError(
+                self.py_name + "\n"
+                f"Cannot read the file '{self.file}'...\n"
+                f"It could happen that firstcell='{cellname}' was "
+                "read as a cell range name due to a wrong definition "
+                "of cell value"
             )
+        global_cellranges = excel.defined_names
+        local_cellranges = None
+        # need to lower the sheetnames as Vensim has no case sensitivity
+        for sheet in excel.sheetnames:
+            if sheet.lower() == self.tab.lower():
+                local_cellranges = excel[sheet].defined_names
+                break
 
-        self.subscript = [prefix + str(d) for d in data.values.flatten()]
+        if local_cellranges is None:
+            # Error if it is not able to get the localSheetId
+            raise ValueError(
+                self.py_name + "\n"
+                "The sheet doesn't exist...\n"
+                + self._file_sheet
+            )
+        try:
+            # Search for local and global names
+            cellrange = local_cellranges.get(cellname)\
+                        or global_cellranges.get(cellname)
+            sheet, cells = next(cellrange.destinations)
+
+            assert sheet.lower() == self.tab.lower()
+            self.tab = sheet  # case insensitivity in sheet name
+
+            # Get the cells where the cellrange is defined
+            first_cell, last_cell = cells.replace("$", '').split(":")
+        except (AttributeError, AssertionError):
+            # key error if the cellrange doesn't exist in the file or sheet
+            raise AttributeError(
+               self.py_name + "\n"
+               f"The cellrange name '{cellname}'\n"
+               "Doesn't exist in:\n" + self._file_sheet
+               )
+        else:
+            return self.get_subscripts_cell(
+                *self._split_excel_cell(first_cell), last_cell)
+
+    @staticmethod
+    def _not_nan(value):
+        """Check if a value is not nan"""
+        if isinstance(value, str):
+            return True
+        return not np.isnan(value)
