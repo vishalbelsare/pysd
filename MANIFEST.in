@@ -1,5 +1,5 @@
 include requirements.txt
-include dev-requirements.txt
 include README.md
 include LICENSE
-include pysd/py_backend/xmile/smile.grammar
+include docs/images/PySD_Logo*
+graft pysd/translators/*/parsing_grammars

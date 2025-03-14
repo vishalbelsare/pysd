@@ -3,8 +3,7 @@ Installation
 
 Installing via pip
 ------------------
-To install the PySD package from the Python package index into an established
-Python environment, use the pip command:
+To install the PySD package from the Python package index use the pip command:
 
 .. code-block:: bash
 
@@ -12,7 +11,7 @@ Python environment, use the pip command:
 
 Installing with conda
 ---------------------
-To install PySD with conda, using the conda-forge channel, into a conda environment, use the following command:
+To install PySD with conda, using the conda-forge channel, use the following command:
 
 .. code-block:: bash
 
@@ -20,15 +19,15 @@ To install PySD with conda, using the conda-forge channel, into a conda environm
 
 Installing from source
 ----------------------
-To install from the source, clone the project with git:
+To install from source, clone the project with git:
 
 .. code-block:: bash
 
-   git clone https://github.com/JamesPHoughton/pysd.git
+   git clone https://github.com/SDXorg/pysd.git
 
-Or download the latest version from the project webpage: https://github.com/JamesPHoughton/pysd
+or download the latest version from the project repository: https://github.com/SDXorg/pysd
 
-In the source directory use the command
+In the source directory use the command:
 
 .. code-block:: bash
 
@@ -38,33 +37,43 @@ In the source directory use the command
 
 Required Dependencies
 ---------------------
-PySD was originally built on python 2.7. Hoewever, the last version requires at least **python 3.7**.
+PySD requires **Python 3.9** or above.
 
-PySD calls on the core Python data analytics stack, and a third party parsing library:
+PySD builds on the core Python data analytics stack, and the following third party libraries:
 
-* Numpy
+* Numpy >= 1.23
 * Scipy
-* Pandas
+* Pandas (with Excel support: `pip install pandas[excel]`)
 * Parsimonious
-* xarray
-* xlrd
+* xarray >= 2023.09
 * lxml
 * regex
 * chardet
 * black
-* openpyxl
-* progressbar
+* openpyxl >= 3.1
+* progressbar2
+* portion
 
 These modules should build automatically if you are installing via `pip`. If you are building from
-the source code, or if pip fails to load them, they can be loaded with the same `pip` syntax as
+source, or if pip fails to load them, they can be loaded with the same `pip` syntax as
 above.
 
 
 Optional Dependencies
 ---------------------
-In order to plot results from the model as shown in :doc:`basic usage <../basic_usage>`:
+In order to plot model outputs as shown in :doc:`Getting started <../getting_started>`:
 
 * Matplotlib
+
+To export data to netCDF (*.nc*) files or to serialize external objects:
+
+* netCDF4
+
+To export netCDF data to comma or tab separated files with parallel processing:
+
+* dask[array]
+* dask[diagnostics]
+* dask[distributed]
 
 
 These Python libraries bring additional data analytics capabilities to the analysis of SD models:
@@ -77,10 +86,10 @@ These Python libraries bring additional data analytics capabilities to the analy
 Additionally, the System Dynamics Translator utility developed by Robert Ward is useful for
 translating models from other system dynamics formats into the XMILE standard, to be read by PySD.
 
-These modules can be installed using pip with syntax similar to the above.
+These modules can be installed using pip with a syntax similar to the above.
 
 
 Additional Resources
 --------------------
-The `PySD Cookbook <https://github.com/JamesPHoughton/PySD-Cookbook>`_ contains recipes that can help you get set up with PySD.
+The `PySD Cookbook <https://github.com/SDXorg/PySD-Cookbook>`_ contains recipes that can help you get set up with PySD.
 

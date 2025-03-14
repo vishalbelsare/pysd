@@ -1,3 +1,4 @@
+import sys
 import pytest
 import shutil
 
@@ -37,14 +38,21 @@ times = np.arange(11)
 @pytest.mark.parametrize(
     "data_files_short,expected",
     [
-        (  # one_file
+        (  # one_file_tab
             "data1.tab",
             pd.DataFrame(
                 index=times,
                 data={'var1': times, "var2": 2*times, "var3": 3*times}
             )
         ),
-        (  # two_files
+        (  # one_file_netcdf
+            "all_data.nc",
+            pd.DataFrame(
+                index=times,
+                data={'var1': times, "var2": 2*times, "var3": 3*times}
+            )
+        ),
+        (  # two_files_tab
             ["data3.tab",
              "data1.tab"],
             pd.DataFrame(
@@ -52,6 +60,23 @@ times = np.arange(11)
                 data={'var1': -times, "var2": -2*times, "var3": 3*times}
             )
 
+        ),
+        (  # two_files_netcdf
+            ["data1.nc",
+             "all_data.nc"],
+            pd.DataFrame(
+                index=times,
+                data={'var1': -times, "var2": 2*times, "var3": -3*times}
+            )
+
+        ),
+        (  # two_files_mix
+            ["data3.tab",
+             "all_data.nc"],
+            pd.DataFrame(
+                index=times,
+                data={'var1': -times, "var2": -2*times, "var3": 3*times}
+            )
         ),
         (  # transposed_file
             ["data2.tab"],
@@ -71,7 +96,8 @@ times = np.arange(11)
         )
 
     ],
-    ids=["one_file", "two_files", "transposed_file", "dict_file"]
+    ids=["one_file_tab", "one_file_netcdf", "two_files_tab",
+         "two_files_netcdf", "two_files_mix", "transposed_file", "dict_file"]
 )
 class TestPySDData:
 
@@ -92,6 +118,18 @@ class TestPySDData:
         assert_frames_close(
             model.run(return_columns=["var1", "var2", "var3"]),
             expected)
+
+    def test_modify_data(self, model, expected):
+        with pytest.warns(UserWarning, match="Replacing .*"):
+            out = model.run(params={
+                "var1": pd.Series(index=[1, 3, 7], data=[10, 20, 30]),
+                "var2": 10
+            })
+
+        assert (out["var2"] == 10).all()
+        assert (
+            out["var1"] == [10, 10, 15, 20, 22.5, 25, 27.5, 30, 30, 30, 30]
+        ).all()
 
 
 class TestPySDDataErrors:
@@ -131,9 +169,11 @@ class TestPySDDataErrors:
         ],
         ids=["missing_data", "data_variable_not_found_from_dict_file"]
     )
+    @pytest.mark.skipif(
+        sys.platform.startswith("win"),
+        reason=r"bad scape \e")
     def test_loading_error(self, data_model, data_files, raise_type,
                            error_message, shared_tmpdir):
-
         with pytest.raises(raise_type, match=error_message % (data_files)):
             self.model(
                 data_model, data_files, shared_tmpdir)

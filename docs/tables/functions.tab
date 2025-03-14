@@ -1,0 +1,52 @@
+Vensim	Vensim example	Xmile	Xmile example	Abstract Syntax	Python Translation	Vensim comments	Xmile comments	Python comments
+ABS	ABS(A)	abs	abs(A)	"CallStructure('abs', (A,))"	numpy.abs(A)
+MIN	"MIN(A, B)"	min	"min(A, B)"	"CallStructure('min', (A, B))"	"numpy.minimum(A, B)"
+MAX	"MAX(A, B)"	max	"max(A, B)"	"CallStructure('max', (A, B))"	"numpy.maximum(A, B)"
+		min	"min(A)"	"CallStructure('vmin_xmile', (A,))"	pysd.functions.vmin(A)
+		max	"max(A)"	"CallStructure('vmax_xmile', (A,))"	pysd.functions.vmax(A)
+SQRT	SQRT(A)	sqrt	sqrt(A)	"CallStructure('sqrt', (A,))"	numpy.sqrt
+EXP	EXP(A)	exp	exp(A)	"CallStructure('exp', (A,))"	numpy.exp(A)
+LN	LN(A)	ln	ln(A)	"CallStructure('ln', (A,))"	numpy.log(A)
+		pi	pi()	"CallStructure('pi', (,))"	numpy.py
+SIN	SIN(A)	sin	sin(A)	"CallStructure('sin', (A,))"	numpy.sin(A)
+COS	COS(A)	cos	cos(A)	"CallStructure('cos', (A,))"	numpy.cos(A)
+TAN	TAN(A)	tan	tan(A)	"CallStructure('tan', (A,))"	numpy.tan(A)
+ARCSIN	ARCSIN(A)	arcsin	arcsin(A)	"CallStructure('arcsin', (A,))"	numpy.arcsin(A)
+ARCCOS	ARCCOS(A)	arccos	arccos(A)	"CallStructure('arccos', (A,))"	numpy.arccos(A)
+ARCTAN	ARCTAN(A)	arctan	arctan(A)	"CallStructure('arctan', (A,))"	numpy.arctan(A)
+INVERT MATRIX	INVERT MATRIX(A)			"CallStructure('invert_matrix', (A,))"	pysd.functions.invert_matrix(A)
+ELMCOUNT	ELMCOUNT(A)			"CallStructure('elmcount', (A,))"	len(A)
+INTEGER	INTEGER(A)	int	int(A)	"CallStructure('int', (A,))"	pysd.functions.integer(A)
+QUANTUM	"QUANTUM(A, B)"			"CallStructure('quantum', (A, B))"	"pysd.functions.quantum(A, B)"
+MODULO	"MODULO(A, B)"			"CallStructure('modulo', (A, B))"	"pysd.functions.modulo(A, B)"
+IF THEN ELSE	"IF THEN ELSE(A, B, C)"	if_then_else	"if_then_else(A, B, C)"	"CallStructure('if_then_else', (A, B))"	"pysd.functions.if_then_else(A, lambda: B, lambda: C)"
+		IF condition THEN value_true ELSE value_false	IF A THEN B ELSE C	"CallStructure('if_then_else', (A, B))"	"pysd.functions.if_then_else(A, lambda: B, lambda: C)"
+XIDZ	"XIDZ(A, B, X)"	safediv	"safediv(A, B, X)"	"CallStructure('xidz', (A, B, X))"	"pysd.functions.xidz(A, B, X)"
+ZIDZ	"ZIDZ(A, B)"	safediv	"safediv(A, B)"	"CallStructure('zidz', (A, B))"	"pysd.functions.zidz(A, B)"
+
+VMIN	VMIN(A[dim!])			"CallStructure('vmin', (A,))"	pysd.functions.vmin(A, ['dim!'])
+VMAX	VMAX(A[dim!])			"CallStructure('vmax', (A,))"	pysd.functions.vmax(A, ['dim!'])
+SUM	SUM(A[dim!])			"CallStructure('sum', (A,))"	pysd.functions.sum(A, ['dim!'])
+PROD	PROD(A[dim!])			"CallStructure('prod', (A,))"	pysd.functions.prod(A, ['dim!'])
+
+PULSE	PULSE(start, width)			"CallStructure('pulse', (start, width))"	pysd.functions.pulse(start, width=width)
+		pulse	pulse(magnitude, start)	"CallStructure('Xpulse', (start, magnitude))"	pysd.functions.pulse(start, magnitude=magnitude)		Not tested for Xmile!
+		pulse	pulse(magnitude, start, interval)	"CallStructure('Xpulse_train', (start, interval, magnitude))"	pysd.functions.pulse(start, repeat_time=interval, magnitude=magnitude)		Not tested for Xmile!
+PULSE TRAIN	PULSE TRAIN(start, width, tbetween, end)			"CallStructure('pulse_train', (start, tbetween, width, end))"	pysd.functions.pulse(start, repeat_time=tbetween, width=width, end=end)
+RAMP	RAMP(slope, start_time, end_time)	ramp	ramp(slope, start_time, end_time)	"CallStructure('ramp', (slope, start_time, end_time))"	pysd.functions.ramp(time, slope, start_time, end_time)		Not tested for Xmile!
+		ramp	ramp(slope, start_time)	"CallStructure('ramp', (slope, start_time))"	pysd.functions.ramp(time, slope, start_time)		Not tested for Xmile!
+STEP	STEP(height, step_time)	step	step(height, step_time)	"CallStructure('step', (height, step_time))"	pysd.functions.step(time, height, step_time)		Not tested for Xmile!
+GET TIME VALUE	GET TIME VALUE(relativeto, offset, measure)			"CallStructure('get_time_value', (relativeto, offset, measure))"	pysd.functions.get_time_value(time, relativeto, offset, measure)	Not all the cases implemented!
+VECTOR SELECT	VECTOR SELECT(sel_array[dim!], exp_array[dim!], miss_val, n_action, e_action)			"CallStructure('vector_select', (sel_array, exp_array, miss_val, n_action, e_action))"	pysd.functions.vector_select(sel_array, exp_array, ['dim!'], miss_val, n_action, e_action)
+VECTOR RANK	VECTOR RANK(vec, direction)			"CallStructure('vector_rank', (vec, direction))"	vector_rank(vec, direction)
+VECTOR REORDER	VECTOR REORDER(vec, svec)			"CallStructure('vector_reorder', (vec, svec))"	vector_reorder(vec, svec)
+VECTOR SORT ORDER	VECTOR SORT ORDER(vec, direction)			"CallStructure('vector_sort_order', (vec, direction))"	vector_sort_order(vec, direction)
+GAME	GAME(A)			GameStructure(A)	A
+ALLOCATE AVAILABLE	"ALLOCATE AVAILABLE(request, pp, avail)"			"AllocateAvailableStructure(request, pp, avail)"	allocate_available(request, pp, avail)			Not all the priority profiles are included.
+ALLOCATE BY PRIORITY	"ALLOCATE BY PRIORITY(request, priority, size, width, supply)"			"AllocateByPriorityStructure(request, priority, size, width, supply)"	allocate_by_priority(request, priority, width, supply)
+INITIAL	INITIAL(value)	init	init(value)	InitialStructure(value)	pysd.statefuls.Initial
+SAMPLE IF TRUE	"SAMPLE IF TRUE(condition, input, initial_value)"			"SampleIfTrueStructure(condition, input, initial_value)"	pysd.statefuls.SampleIfTrue(...)
+RANDOM 0 1	"RANDOM 0 1()"			"CallStructure('random_0_1', ())"	np.random.uniform(0, 1, size=final_shape)
+RANDOM UNIFORM	"RANDOM UNIFORM(m, x, s)"			"CallStructure('random_uniform', (m, x, s))"	np.random.uniform(m, x, size=final_shape)
+RANDOM NORMAL	"RANDOM NORMAL(m, x, h, r, s)"			"CallStructure('random_normal', (m, x, h, r, s))"	stats.truncnorm.rvs((m-h)/r, (x-h)/r, loc=h, scale=r, size=final_shape)
+RANDOM EXPONENTIAL	"RANDOM EXPONENTIAL(m, x, h, r, s)"			"CallStructure('random_exponential', (m, x, h, r, s))"	stats.truncexpon.rvs((x-np.maximum(m, h))/r, loc=np.maximum(m, h), scale=r, size=final_shape)
